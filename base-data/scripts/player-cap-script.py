@@ -1,49 +1,66 @@
-import requests
 import pandas as pd
-from bs4 import BeautifulSoup
 import json
 from pathlib import Path
 
 URL = "https://www.spotrac.com/nfl/rankings/player/_/year/2025/sort/cap_total"
-
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (compatible; nfl-project/1.0)"
-}
-
 OUTPUT_PATH = Path("base-data/data/player-cap.json")
 
-
 def fetch_spotrac_2025_cap():
-    response = requests.get(URL, headers=HEADERS, timeout=30)
-    response.raise_for_status()
+    # read_html handles Spotrac's markup correctly
+    tables = pd.read_html(URL)
 
-    soup = BeautifulSoup(response.text, "lxml")
-    table = soup.find("table")
+    if not tables:
+        raise ValueError("No tables found on Spotrac page")
 
-    if table is None:
-        raise ValueError("Spotrac table not found")
+    df = tables[0]
 
-    rows = table.find("tbody").find_all("tr")
-    players = []
+    # Inspect expected columns defensively
+    df.columns = [c.lower().replace(" ", "_") for c in df.columns]
 
-    for row in rows:
-        cols = [c.get_text(strip=True) for c in row.find_all("td")]
+    required_cols = [
+        "player",
+        "team",
+        "pos",
+        "age",
+        "cap_hit",
+        "cash",
+        "yrs"
+    ]
 
-        if len(cols) < 8:
-            continue
+    for col in required_cols:
+        if col not in df.columns:
+            raise ValueError(f"Expected column not found: {col}")
 
-        players.append({
-            "player": cols[1],
-            "team": cols[2],
-            "position": cols[3],
-            "age": int(cols[4]) if cols[4].isdigit() else None,
-            "cap_hit": float(cols[5].replace("$", "").replace(",", "")),
-            "cash_2025": float(cols[6].replace("$", "").replace(",", "")),
-            "contract_length": cols[7],
-            "season": 2025
-        })
+    df = df[required_cols].copy()
 
-    return players
+    # Clean numeric columns
+    df["cap_hit"] = (
+        df["cap_hit"]
+        .astype(str)
+        .str.replace("$", "", regex=False)
+        .str.replace(",", "", regex=False)
+        .astype(float)
+    )
+
+    df["cash"] = (
+        df["cash"]
+        .astype(str)
+        .str.replace("$", "", regex=False)
+        .str.replace(",", "", regex=False)
+        .astype(float)
+    )
+
+    df["age"] = pd.to_numeric(df["age"], errors="coerce")
+    df["season"] = 2025
+
+    # Rename for consistency
+    df = df.rename(columns={
+        "pos": "position",
+        "cash": "cash_2025",
+        "yrs": "contract_years"
+    })
+
+    return df.to_dict(orient="records")
 
 
 if __name__ == "__main__":
