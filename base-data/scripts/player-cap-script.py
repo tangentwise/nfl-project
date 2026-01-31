@@ -1,27 +1,30 @@
 import requests
 import pandas as pd
 from bs4 import BeautifulSoup
-import time
+import json
+from pathlib import Path
 
 URL = "https://www.spotrac.com/nfl/rankings/player/_/year/2025/sort/cap_total"
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (compatible; TangentWiseBot/1.0; +https://tangentwise.com)"
+    "User-Agent": "Mozilla/5.0 (compatible; nfl-project/1.0)"
 }
+
+OUTPUT_PATH = Path("base-data/data/player-cap.json")
+
 
 def fetch_spotrac_2025_cap():
     response = requests.get(URL, headers=HEADERS, timeout=30)
     response.raise_for_status()
 
     soup = BeautifulSoup(response.text, "lxml")
-
     table = soup.find("table")
+
     if table is None:
-        raise ValueError("Could not find data table on Spotrac page")
+        raise ValueError("Spotrac table not found")
 
     rows = table.find("tbody").find_all("tr")
-
-    data = []
+    players = []
 
     for row in rows:
         cols = [c.get_text(strip=True) for c in row.find_all("td")]
@@ -29,35 +32,26 @@ def fetch_spotrac_2025_cap():
         if len(cols) < 8:
             continue
 
-        data.append({
+        players.append({
             "player": cols[1],
             "team": cols[2],
             "position": cols[3],
-            "age": cols[4],
-            "cap_hit": cols[5],
-            "cash_2025": cols[6],
+            "age": int(cols[4]) if cols[4].isdigit() else None,
+            "cap_hit": float(cols[5].replace("$", "").replace(",", "")),
+            "cash_2025": float(cols[6].replace("$", "").replace(",", "")),
             "contract_length": cols[7],
+            "season": 2025
         })
 
-    df = pd.DataFrame(data)
-
-    # Clean money columns
-    money_cols = ["cap_hit", "cash_2025"]
-    for col in money_cols:
-        df[col] = (
-            df[col]
-            .str.replace("$", "", regex=False)
-            .str.replace(",", "", regex=False)
-            .astype(float)
-        )
-
-    return df
+    return players
 
 
 if __name__ == "__main__":
-    df = fetch_spotrac_2025_cap()
+    data = fetch_spotrac_2025_cap()
 
-    df.to_csv("nfl_2025_cap_hit.csv", index=False)
+    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-    print("Saved nfl_2025_cap_hit.csv")
-    print(df.head())
+    with open(OUTPUT_PATH, "w") as f:
+        json.dump(data, f, indent=2)
+
+    print(f"Saved {OUTPUT_PATH}")
